@@ -1,0 +1,310 @@
+import java.util.*;
+//code by  bhargavi
+public class SmartCodeEval {
+
+    // Map for variables
+    private Map<String, Double> variables = new HashMap<>();
+
+    // Supported functions
+    private static final Set<String> FUNCTIONS = Set.of(
+        "sin", "cos", "tan", "max", "min", "sqrt", "log", "ln", "abs", "sum", "avg"
+    );
+
+    // Operator precedence and associativity info
+    private static final Map<String, Integer> PRECEDENCE = Map.of(
+            "+", 1, "-", 1,
+            "*", 2, "/", 2,
+            "^", 3,
+            "~", 4 // unary minus highest precedence
+    );
+
+    private static final Map<String, Boolean> RIGHT_ASSOCIATIVE = Map.of(
+            "^", true,
+            "~", true
+    );
+//code by bhargavi
+    // Auto-correct missing parentheses
+    public static String fixParentheses(String expr) {
+        int open = 0;
+        StringBuilder fixed = new StringBuilder();
+        for (char c : expr.toCharArray()) {
+            if (c == '(') open++;
+            else if (c == ')') {
+                if (open > 0) open--;
+                else continue; // skip extra ')'
+            }
+            fixed.append(c);
+        }
+        while (open-- > 0) fixed.append(')');
+        return fixed.toString();
+    }
+
+    // Tokenize input string (numbers, vars, functions, operators, parentheses)
+    private static List<String> tokenize(String expr) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder token = new StringBuilder();
+
+        int i = 0;
+        while (i < expr.length()) {
+            char c = expr.charAt(i);
+
+            if (Character.isWhitespace(c)) {
+                i++;
+                continue;
+            }
+
+            // Handle operators and parentheses as separate tokens
+            if ("()+-*/^=,".indexOf(c) >= 0) {
+                // Special handling for unary minus
+                if (c == '-') {
+                    // If at start or after '(' or operator, treat as unary minus "~"
+                    if (tokens.isEmpty() || tokens.get(tokens.size() - 1).equals("(") || isOperator(tokens.get(tokens.size() - 1)) || tokens.get(tokens.size() - 1).equals(",")) {
+                        tokens.add("~"); // unary minus token
+                        i++;
+                        continue;
+                    }
+                }
+
+                if (token.length() > 0) {
+                    tokens.add(token.toString());
+                    token.setLength(0);
+                }
+                tokens.add(String.valueOf(c));
+                i++;
+            } else {
+                // Collect letters/digits/dot for numbers, vars, functions
+                token.append(c);
+                i++;
+                // Peek ahead to decide when to end token
+                if (i == expr.length() || (!Character.isLetterOrDigit(expr.charAt(i)) && expr.charAt(i) != '.')) {
+                    tokens.add(token.toString());
+                    token.setLength(0);
+                }
+            }
+        }
+
+        return tokens;
+    }
+
+    // Check if token is operator
+    private static boolean isOperator(String t) {
+        return PRECEDENCE.containsKey(t);
+    }
+
+    // Check if token is function
+    private static boolean isFunction(String t) {
+        return FUNCTIONS.contains(t.toLowerCase());
+    }
+
+    // Check if token is number
+    private static boolean isNumber(String t) {
+        try {
+            Double.parseDouble(t);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // Check if token is variable name (letters and digits but not starting with digit)
+    private static boolean isVariable(String t) {
+        return t.matches("[a-zA-Z_][a-zA-Z0-9_]*") && !isFunction(t);
+    }
+//code by 712
+    // Infix to postfix conversion (Shunting Yard algorithm)
+    private List<String> infixToPostfix(List<String> tokens) throws Exception {
+        List<String> output = new ArrayList<>();
+        Stack<String> stack = new Stack<>();
+
+        for (int i = 0; i < tokens.size(); i++) {
+            String token = tokens.get(i);
+
+            if (isNumber(token) || isVariable(token)) {
+                output.add(token);
+            } else if (isFunction(token)) {
+                stack.push(token);
+            } else if (token.equals(",")) {
+                // Pop until '(' for function arguments
+                while (!stack.isEmpty() && !stack.peek().equals("(")) {
+                    output.add(stack.pop());
+                }
+                if (stack.isEmpty()) throw new Exception("Misplaced comma or parentheses");
+            } else if (isOperator(token)) {
+                while (!stack.isEmpty() && isOperator(stack.peek())) {
+                    String top = stack.peek();
+                    int prec1 = PRECEDENCE.get(token);
+                    int prec2 = PRECEDENCE.get(top);
+                    boolean rightAssoc = RIGHT_ASSOCIATIVE.getOrDefault(token, false);
+
+                    if ((rightAssoc && prec1 < prec2) || (!rightAssoc && prec1 <= prec2)) {
+                        output.add(stack.pop());
+                    } else {
+                        break;
+                    }
+                }
+                stack.push(token);
+            } else if (token.equals("(")) {
+                stack.push(token);
+            } else if (token.equals(")")) {
+                while (!stack.isEmpty() && !stack.peek().equals("(")) {
+                    output.add(stack.pop());
+                }
+                if (stack.isEmpty()) throw new Exception("Mismatched parentheses");
+                stack.pop(); // Pop '('
+                if (!stack.isEmpty() && isFunction(stack.peek())) {
+                    output.add(stack.pop());
+                }
+            } else if (token.equals("=")) {
+                // Assignment operator should be handled specially in evaluate(), not here
+                stack.push(token);
+            } else {
+                throw new Exception("Unknown token: " + token);
+            }
+        }
+
+        while (!stack.isEmpty()) {
+            String top = stack.pop();
+            if (top.equals("(") || top.equals(")")) throw new Exception("Mismatched parentheses");
+            output.add(top);
+        }
+
+        return output;
+    }
+
+    // Evaluate postfix with variables and functions, stack trace logging
+    private double evaluatePostfix(List<String> postfix) {
+        Stack<Double> stack = new Stack<>();
+
+        for (String token : postfix) {
+            System.out.println("Token: " + token + " | Stack before: " + stack);
+
+            if (isNumber(token)) {
+                stack.push(Double.parseDouble(token));
+            } else if (isVariable(token)) {
+                if (!variables.containsKey(token))
+                    throw new RuntimeException("Variable '" + token + "' not defined");
+                stack.push(variables.get(token));
+            } else if (token.equals("~")) { // unary minus
+                if (stack.isEmpty()) throw new RuntimeException("No operand for unary minus");
+                stack.push(-stack.pop());
+            } else if (isOperator(token)) {
+                if (stack.size() < 2) throw new RuntimeException("Not enough operands for operator " + token);
+                double b = stack.pop();
+                double a = stack.pop();
+                switch (token) {
+                    case "+" -> stack.push(a + b);
+                    case "-" -> stack.push(a - b);
+                    case "*" -> stack.push(a * b);
+                    case "/" -> {
+                        if (b == 0) throw new RuntimeException("Division by zero");
+                        stack.push(a / b);
+                    }
+                    case "^" -> stack.push(Math.pow(a, b));
+                    default -> throw new RuntimeException("Unknown operator: " + token);
+                }
+            } else if (isFunction(token)) {
+                String f = token.toLowerCase();
+
+                if (Set.of("sin", "cos", "tan", "sqrt", "log", "ln", "abs").contains(f)) {
+                    if (stack.isEmpty()) throw new RuntimeException("No argument for function " + f);
+                    double arg = stack.pop();
+                    double val;
+                    switch (f) {
+                        case "sin" -> val = Math.sin(Math.toRadians(arg));
+                        case "cos" -> val = Math.cos(Math.toRadians(arg));
+                        case "tan" -> val = Math.tan(Math.toRadians(arg));
+                        case "sqrt" -> {
+                            if (arg < 0) throw new RuntimeException("sqrt of negative number");
+                            val = Math.sqrt(arg);
+                        }
+                        case "log" -> {
+                            if (arg <= 0) throw new RuntimeException("log of non-positive number");
+                            val = Math.log10(arg);
+                        }
+                        case "ln" -> {
+                            if (arg <= 0) throw new RuntimeException("ln of non-positive number");
+                            val = Math.log(arg);
+                        }
+                        case "abs" -> val = Math.abs(arg);
+                        default -> throw new RuntimeException("Unknown function " + f);
+                    }
+                    stack.push(val);
+                } else if (Set.of("max", "min", "sum", "avg").contains(f)) {
+                    if (stack.size() < 2) throw new RuntimeException(f + " requires 2 arguments");
+                    double b = stack.pop();
+                    double a = stack.pop();
+                    double val;
+                    switch (f) {
+                        case "max" -> val = Math.max(a, b);
+                        case "min" -> val = Math.min(a, b);
+                        case "sum" -> val = a + b;
+                        case "avg" -> val = (a + b) / 2.0;
+                        default -> throw new RuntimeException("Unknown function " + f);
+                    }
+                    stack.push(val);
+                } else {
+                    throw new RuntimeException("Unsupported function " + f);
+                }
+            } else {
+                throw new RuntimeException("Unknown token during evaluation: " + token);
+            }
+
+            System.out.println("Stack after: " + stack + "\n");
+        }
+
+        if (stack.size() != 1) throw new RuntimeException("Invalid expression");
+        return stack.pop();
+    }
+
+    // Parse and evaluate an expression with optional variable assignment
+    public double evaluate(String expr) throws Exception {
+        expr = fixParentheses(expr);
+        List<String> tokens = tokenize(expr);
+
+        // Handle assignment e.g. "a = 5 + 3"
+        int assignIndex = tokens.indexOf("=");
+        if (assignIndex != -1) {
+            if (assignIndex == 0)
+                throw new Exception("No variable name before assignment");
+            String varName = tokens.get(assignIndex - 1);
+            if (!isVariable(varName))
+                throw new Exception("Invalid variable name '" + varName + "'");
+
+            // Expression tokens after '='
+            List<String> rhsTokens = tokens.subList(assignIndex + 1, tokens.size());
+            List<String> postfix = infixToPostfix(rhsTokens);
+            double val = evaluatePostfix(postfix);
+
+            variables.put(varName, val);
+            System.out.println("Assigned: " + varName + " = " + val);
+            return val;
+        } else {
+            List<String> postfix = infixToPostfix(tokens);
+            return evaluatePostfix(postfix);
+        }
+    }
+
+    public static void main(String[] args) {
+        SmartCodeEval eval = new SmartCodeEval();
+        Scanner sc = new Scanner(System.in);
+        System.out.println("Enter expression (supports variables, functions, + - * / ^):");
+        System.out.println("Type 'exit' to quit.");
+
+        while (true) {
+            try {
+                System.out.print("> ");
+                String input = sc.nextLine();
+                if (input.trim().equalsIgnoreCase("exit")) break;
+
+                double result = eval.evaluate(input);
+                System.out.println("Result: " + result);
+            } catch (Exception e) {
+                System.out.println("Error: " + e.getMessage());
+            }
+        }
+        System.out.println("Bye!");
+        sc.close();
+    }
+}
+
+//code by 221fa04712
